@@ -1,0 +1,6 @@
+{
+  "name": "openperipheral",
+  "version-string": "0.1.0",
+  "description": "Hardware capability and peripheral abstraction layer",
+  "dependencies": []
+}
