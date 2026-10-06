@@ -1,6 +1,6 @@
-# OpenPeripheral
+# OpenPeripherals
 
-OpenPeripheral is a hardware capability and peripheral abstraction layer.
+OpenPeripherals is a hardware capability and peripheral abstraction layer.
 Devices will expose what they can do rather than requiring applications to
 understand specific categories of hardware.
 
@@ -9,14 +9,14 @@ Physical Hardware
        ↓
 OS / Vendor API
        ↓
-OpenPeripheral Provider
+OpenPeripherals Provider
        ↓
-OpenPeripheral
+OpenPeripherals
        ↓
 Application / VISR
 ```
 
-OpenPeripheral is independent of VISR, although VISR is an intended consumer.
+OpenPeripherals is independent of VISR, although VISR is an intended consumer.
 Provider implementations are kept outside the core and can later support
 platform, vendor, and protocol-specific hardware.
 
@@ -43,6 +43,6 @@ For a vcpkg-managed build, set `VCPKG_ROOT` and use the `vcpkg` preset.
 After installation, consumers can use:
 
 ```cmake
-find_package(OpenPeripheral CONFIG REQUIRED)
-target_link_libraries(MyProgram PRIVATE OpenPeripheral::OpenPeripheral)
+find_package(OpenPeripherals CONFIG REQUIRED)
+target_link_libraries(MyProgram PRIVATE OpenPeripherals::OpenPeripherals)
 ```

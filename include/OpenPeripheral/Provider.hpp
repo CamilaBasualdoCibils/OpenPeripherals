@@ -1,17 +1,26 @@
 #pragma once
 
-#include "OpenPeripheral/Device.hpp"
 
+
+#include "OpenPeripheral/PhysicalPeripheral.hpp"
 #include <memory>
 #include <vector>
 
-namespace OpenPeripheral {
+namespace OpenPeripherals {
 
+struct ProviderInfo {
+  std::string name;
+  std::string description;
+};
 class IProvider {
 public:
-    virtual ~IProvider() = default;
+  [[nodiscard]] virtual ProviderInfo GetProviderInfo() const = 0;
 
-    [[nodiscard]] virtual std::vector<std::shared_ptr<IDevice>> EnumerateDevices() = 0;
+public:
+  virtual ~IProvider() = default;
+
+  [[nodiscard]] virtual std::vector<std::shared_ptr<IPhysicalPeripheral>>
+  EnumerateDevices() = 0;
 };
 
-} // namespace OpenPeripheral
+} // namespace OpenPeripherals

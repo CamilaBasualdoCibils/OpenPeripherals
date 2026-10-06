@@ -2,5 +2,26 @@
   "name": "openperipheral",
   "version-string": "0.1.0",
   "description": "Hardware capability and peripheral abstraction layer",
-  "dependencies": []
+  "dependencies": [
+        "boost-describe",
+    "libevdev",
+    "gtest",
+    {
+      "name": "glfw3",
+      "features": [
+        "wayland"
+      ]
+    },
+     "implot",
+      {
+      "name": "imgui",
+      "features": [
+        "freetype-svg",
+        "glfw-binding",
+        "opengl3-binding",
+        "vulkan-binding",
+        "docking-experimental"
+      ]
+    }
+  ]
 }

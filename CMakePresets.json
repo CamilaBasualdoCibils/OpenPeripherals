@@ -6,7 +6,7 @@
       "name": "default",
       "displayName": "Default development build",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/default",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "OPENPERIPHERAL_BUILD_TESTS": "ON",
@@ -17,7 +17,7 @@
       "name": "vcpkg",
       "displayName": "vcpkg development build",
       "inherits": "default",
-      "binaryDir": "${sourceDir}/build/vcpkg",
+      "binaryDir": "${sourceDir}/build",
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
     }
   ],

@@ -1,5 +1,5 @@
 add_executable(openperipheral-enumerate enumerate.cpp)
-target_link_libraries(openperipheral-enumerate PRIVATE OpenPeripheral::OpenPeripheral)
+target_link_libraries(openperipheral-enumerate PRIVATE OpenPeripherals::OpenPeripherals OpenPeripherals::EvDev)
 
 if(MSVC)
     target_compile_options(openperipheral-enumerate PRIVATE /W4 /permissive-)
