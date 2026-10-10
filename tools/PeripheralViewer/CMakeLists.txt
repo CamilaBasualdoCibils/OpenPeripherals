@@ -6,7 +6,7 @@ find_package(glfw3 REQUIRED)
 find_package(OpenGL REQUIRED)
 target_link_libraries(OpenPeripheralsViewer PRIVATE
 OpenPeripherals::OpenPeripherals
-OpenPeripherals::EvDev
+OpenPeripherals::EvDev::Discovery
 
     imgui::imgui
     glfw

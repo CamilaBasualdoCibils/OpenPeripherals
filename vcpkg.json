@@ -4,6 +4,8 @@
   "description": "Hardware capability and peripheral abstraction layer",
   "dependencies": [
         "boost-describe",
+        "boost-uuid",
+        "boost-graph",
     "libevdev",
     "gtest",
     {
@@ -22,6 +24,7 @@
         "vulkan-binding",
         "docking-experimental"
       ]
-    }
+    },
+    "msquic"
   ]
 }

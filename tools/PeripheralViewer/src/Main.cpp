@@ -1,9 +1,7 @@
 
 #include "GLFW/glfw3.h"
-#include "OpenPeripheral/EvDev/EvdevDevice.hpp"
-#include "OpenPeripheral/EvDev/EvdevProvider.hpp"
-#include "OpenPeripheral/OpenPeripherals.hpp"
-#include "OpenPeripheral/Provider.hpp"
+#include <OpenPeripherals/Evdev/EvdevDevice.hpp>
+#include <OpenPeripherals/Core/OpenPeripherals.hpp>
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -189,8 +187,8 @@ private:
   bool tree_selected_{};
 
   std::vector<std::shared_ptr<OpenPeripherals::IProvider>> providers_;
-  std::vector<std::shared_ptr<OpenPeripherals::IPhysicalPeripheral>> devices_;
-  std::shared_ptr<OpenPeripherals::IPhysicalPeripheral> selected_device_;
+  std::vector<std::shared_ptr<OpenPeripherals::PhysicalPeripheral>> devices_;
+  std::shared_ptr<OpenPeripherals::PhysicalPeripheral> selected_device_;
 };
 
 int main() {
