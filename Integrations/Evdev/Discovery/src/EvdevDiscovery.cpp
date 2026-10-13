@@ -2,7 +2,16 @@
 #include "OpenPeripherals/Core/Discovery/Endpoint.hpp"
 #include "OpenPeripherals/Evdev/EvdevBus.hpp"
 #include "OpenPeripherals/Evdev/EvdevQuery.hpp"
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <format>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -11,6 +20,35 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
+
+namespace {
+
+OpenPeripherals::UUID MakeStableUUID(const std::string &value) {
+  // FNV-1a with two independent seeds gives this local identifier a stable
+  // value across scans and process restarts without needing a UUID registry.
+  auto hash = [&value](std::uint64_t seed) {
+    std::uint64_t result = seed;
+    for (const unsigned char character : value) {
+      result ^= character;
+      result *= 1099511628211ULL;
+    }
+    return result;
+  };
+
+  const std::uint64_t high = hash(14695981039346656037ULL);
+  const std::uint64_t low = hash(7809847782465536322ULL);
+  std::ostringstream formatted;
+  formatted << std::hex << std::setfill('0') << std::setw(16) << high
+            << std::setw(16) << low;
+  std::string compact = formatted.str();
+  compact.insert(20, "-");
+  compact.insert(16, "-");
+  compact.insert(12, "-");
+  compact.insert(8, "-");
+  return OpenPeripherals::UUID::from_string(compact);
+}
+
+} // namespace
 std::vector<OpenPeripherals::PeripheralObservation>
 OpenPeripherals::EvdevDiscovery::Discover() {
 
@@ -23,7 +61,7 @@ OpenPeripherals::EvdevDiscovery::Discover() {
   }
 
   std::vector<std::filesystem::path> paths;
-  std::vector<OpenPeripherals::Endpoint> endpoints;
+  std::vector<OpenPeripherals::PeripheralObservation> observations;
   for (const auto &entry : iterator) {
     const auto filename = entry.path().filename().string();
 
@@ -103,18 +141,49 @@ OpenPeripherals::EvdevDiscovery::Discover() {
         boost::describe::enum_to_string(Evdev::EvdevBus(id.bustype), "Unknown"),
         std::to_string(id.vendor));
 
-    std::cout << "Found evdev device: " << deviceName << " at " << path << '\n';
-    std::cout << "  Manufacturer: " << manufacturer << '\n';
-    std::cout << "  Physical path: " << physicalPath << '\n';
-    std::cout << "  Unique ID: " << uniqueId << '\n';
-    std::cout << "  ComponentCount: "
-              << static_cast<int>(capabilities.components.size()) << '\n';
+    // Prefer the kernel's unique ID, then physical topology, and finally the
+    // event node path. The path fallback still makes endpoint IDs repeatable
+    // for devices whose drivers expose no stronger identity.
+    const std::string deviceKey =
+        !uniqueId.empty()
+            ? std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
+                          id.product, uniqueId)
+            : (!physicalPath.empty()
+                   ? std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
+                                 id.product, physicalPath)
+                   : std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
+                                 id.product, path.string()));
+    const PeripheralID peripheralId = MakeStableUUID(deviceKey);
+    const EndpointID endpointId = MakeStableUUID("endpoint:" + path.string());
 
-    /* DeviceInfo opInfo{HashDevice(path.string(), id), deviceName,
-    manufacturer, DescribeDevice(path, id, physicalPath, uniqueId)};
-    Evdev::EvdevDeviceInfo evdevInfo{.bus = Evdev::EvdevBus(id.bustype)};
+    PeripheralIdentity identity;
+    identity.claims.push_back(
+        {IdentityType::System, deviceKey});
+    if (id.bustype == BUS_USB) {
+      std::ostringstream usbIdentity;
+      usbIdentity << std::hex << std::setfill('0') << std::setw(4) << id.vendor
+                  << ':' << std::setw(4) << id.product;
+      identity.claims.push_back({IdentityType::USB, usbIdentity.str()});
+    }
 
-    Evdev::EvdevDevice device{evdevInfo, capabilities, opInfo};
-    devices.push_back(std::make_shared<Evdev::EvdevDevice>(device)); */
+    PeripheralInfo info;
+    info.name = deviceName;
+    info.manufacturer = manufacturer;
+    info.model = std::format("{:04x}:{:04x}", id.vendor, id.product);
+    info.description = std::format(
+        "Linux evdev device at {} ({} components)", path.string(),
+        capabilities.components.size());
+
+    Endpoint endpoint{
+        .id = endpointId,
+        .connectionType = "evdev",
+        .address = path.string(),
+        .peripheralHint = peripheralId,
+    };
+    observations.push_back(
+        PeripheralObservation{std::move(identity), std::move(info),
+                              std::move(endpoint)});
   }
+
+  return observations;
 }
