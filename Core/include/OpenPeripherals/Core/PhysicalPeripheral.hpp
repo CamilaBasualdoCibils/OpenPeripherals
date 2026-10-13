@@ -1,8 +1,10 @@
 #pragma once
 
 #include <OpenPeripherals/Core/Types.hpp>
+#include <OpenPeripherals/Core/Discovery/Endpoint.hpp>
+#include <OpenPeripherals/Core/Discovery/PeripheralIdentity.hpp>
+#include <OpenPeripherals/Core/Discovery/PeripheralInfo.hpp>
 #include <optional>
-#include <span>
 #include <vector>
 
 namespace OpenPeripherals {
@@ -46,30 +48,16 @@ struct ResourceDescriptor : ComponentDescriptor {
 
     std::optional<std::uint64_t> size;
 };
-class PhysicalPeripheral {
-public:
-  virtual ~PhysicalPeripheral() = default;
-
-  [[nodiscard]] const DeviceInfo &GetInfo() const noexcept {};
-
-/*   [[nodiscard]]
-  virtual std::span<const ControlDescriptor> GetControls() const = 0;
- */
-  [[nodiscard]]
-  std::span<const StateDescriptor> GetStates() const{ return {}; };
-
-  [[nodiscard]]
-   std::span<const EventDescriptor> GetEvents() const { return {}; };
-
-  [[nodiscard]]
-   std::span<const StreamDescriptor> GetStreams() const { return {}; };
-
-  [[nodiscard]]
-   std::span<const OperationDescriptor> GetOperations() const { return {}; };
-
-  [[nodiscard]]
-   std::span<const ResourceDescriptor> GetResources() const { return {}; };
-  // Device capability interfaces will be defined in a future revision.
+struct PhysicalPeripheral final {
+  PeripheralID id{};
+  PeripheralIdentity identity;
+  PeripheralInfo info;
+  std::vector<Endpoint> endpoints;
+  std::vector<StateDescriptor> states;
+  std::vector<EventDescriptor> events;
+  std::vector<StreamDescriptor> streams;
+  std::vector<OperationDescriptor> operations;
+  std::vector<ResourceDescriptor> resources;
 };
 
 } // namespace OpenPeripherals

@@ -1,26 +1,32 @@
-
 #include "GLFW/glfw3.h"
-#include <OpenPeripherals/Evdev/EvdevDevice.hpp>
 #include <OpenPeripherals/Core/OpenPeripherals.hpp>
+#include <OpenPeripherals/Evdev/EvdevDiscovery.hpp>
+#include "GraphLayout.hpp"
+#include "GraphRenderer.hpp"
+
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_internal.h"
+
 #include <algorithm>
-#include <boost/describe/enum_to_string.hpp>
 #include <memory>
+#include <optional>
 #include <stdexcept>
-class PeripheralViewer {
+#include <string>
+#include <vector>
+
+class PeripheralViewerApp {
 public:
-  PeripheralViewer() {
+  PeripheralViewerApp() {
     if (glfwInit() != GLFW_TRUE)
       throw std::runtime_error("GLFW failed to initialize");
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    window_ =
-        glfwCreateWindow(1200, 800, "OpenPeripherals Viewer", nullptr, nullptr);
+    window_ = glfwCreateWindow(1200, 800, "OpenPeripherals Viewer", nullptr,
+                               nullptr);
     if (!window_)
       throw std::runtime_error("GLFW failed to create the window");
     glfwMakeContextCurrent(window_);
@@ -31,11 +37,11 @@ public:
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    providers_.push_back(std::make_unique<OpenPeripherals::EvdevProvider>());
-    EnumerateDevices();
+    providers_.push_back(std::make_shared<OpenPeripherals::EvdevDiscovery>());
+    EnumeratePeripherals();
   }
 
-  ~PeripheralViewer() {
+  ~PeripheralViewerApp() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -65,133 +71,197 @@ public:
 
 private:
   void Draw() {
-    const ImGuiID dockspace_id = ImGui::GetID("PeripheralViewerDockspace");
-    ImGui::DockSpaceOverViewport(dockspace_id);
-    BuildDefaultDockLayout(dockspace_id);
+    const ImGuiID dockspaceId = ImGui::GetID("PeripheralViewerDockspace");
+    ImGui::DockSpaceOverViewport(dockspaceId);
+    BuildDefaultDockLayout(dockspaceId);
 
-    ImGui::Begin("Peripheral Tree###peripheral_tree");
-    if (ImGui::Button("Refresh")) {
-      EnumerateDevices();
-    }
-    ImGuiTreeNodeFlags root_flags =
-        ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick |
-        ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (tree_selected_)
-      root_flags |= ImGuiTreeNodeFlags_Selected;
-    const bool root_open = ImGui::TreeNodeEx("Peripherals", root_flags);
-    if (ImGui::IsItemClicked())
-      tree_selected_ = true;
-    if (root_open) {
-      for (const auto &device : devices_) {
-        const auto &info = device->GetInfo();
-        ImGuiTreeNodeFlags device_flags = ImGuiTreeNodeFlags_OpenOnArrow |
-                                          ImGuiTreeNodeFlags_OpenOnDoubleClick |
-                                          ImGuiTreeNodeFlags_SpanAvailWidth;
-        if (selected_device_ == device)
-          device_flags |= ImGuiTreeNodeFlags_Selected;
+    DrawPeripheralList();
+    DrawGraph();
+    DrawDetails();
+  }
 
-        // Deliberately not a leaf node: child devices can be added here later.
-        const bool open = ImGui::TreeNodeEx(
-            static_cast<const void *>(device.get()), device_flags, "%s",
-            info.name.empty() ? "Unnamed device" : info.name.c_str());
-        if (ImGui::IsItemClicked())
-          selected_device_ = device;
-        if (open)
-          ImGui::TreePop();
-      }
-      ImGui::TreePop();
-    }
-    ImGui::End();
+  void DrawPeripheralList() {
+    ImGui::Begin("Peripherals###peripheral_list");
+    if (ImGui::Button("Refresh"))
+      EnumeratePeripherals();
+    ImGui::SameLine();
+    ImGui::Text("%zu found", result_.peripherals.size());
+    ImGui::Separator();
 
-    ImGui::Begin("Details###peripheral_details");
-    if (selected_device_) {
-      DrawDeviceDetails();
+    for (const auto &peripheral : result_.peripherals) {
+      const std::string label = peripheral.info.name.empty()
+                                    ? "Unnamed peripheral"
+                                    : peripheral.info.name;
+      const bool selected = selectedPeripheral_ == peripheral.id;
+      ImGui::PushID(peripheral.id.to_string().c_str());
+      if (ImGui::Selectable(label.c_str(), selected))
+        selectedPeripheral_ = peripheral.id;
+      ImGui::PopID();
     }
     ImGui::End();
   }
 
-  void BuildDefaultDockLayout(ImGuiID dockspace_id) {
-    // Preserve any layout restored from imgui.ini or adjusted by the user.
-    if (ImGui::DockBuilderGetNode(dockspace_id) != nullptr)
+  void DrawGraph() {
+    ImGui::Begin("Connections###peripheral_graph");
+    ImGui::TextUnformatted("This machine and its connected peripherals.");
+    ImGui::SameLine();
+    ImGui::TextDisabled("Arrows show connection direction.");
+
+    ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+    canvasSize.x = std::max(canvasSize.x, 220.0F);
+    canvasSize.y = std::max(canvasSize.y, 180.0F);
+    ImGui::InvisibleButton("graph_canvas", canvasSize);
+    const ImVec2 canvasMin = ImGui::GetItemRectMin();
+    const ImVec2 canvasMax = ImGui::GetItemRectMax();
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    const auto &graph = result_.graph.GetGraph();
+    const auto &positions = layout_.Update(graph, ImGui::GetIO().DeltaTime);
+    const auto interaction = renderer_.Draw(
+        drawList, graph, positions, canvasMin, canvasMax, selectedPeripheral_,
+        cameraOffset_, cameraZoom_);
+    cameraOffset_.x += interaction.cameraPanDelta.x;
+    cameraOffset_.y += interaction.cameraPanDelta.y;
+    if (interaction.cameraZoomFactor != 1.0F) {
+      const float oldZoom = cameraZoom_;
+      cameraZoom_ = std::clamp(
+          cameraZoom_ * interaction.cameraZoomFactor,
+          renderer_.Config().minimumZoom, renderer_.Config().maximumZoom);
+      const float zoomRatio = cameraZoom_ / oldZoom;
+      cameraOffset_.x = interaction.cameraAnchor.x -
+                        (interaction.cameraAnchor.x - cameraOffset_.x) * zoomRatio;
+      cameraOffset_.y = interaction.cameraAnchor.y -
+                        (interaction.cameraAnchor.y - cameraOffset_.y) * zoomRatio;
+    }
+    if (interaction.clickedNode)
+      selectedPeripheral_ = interaction.clickedNode;
+    if (interaction.draggedNode) {
+      layout_.MoveNode(*interaction.draggedNode, interaction.dragPosition, true);
+    }
+    if (interaction.dragEnded && !renderer_.Config().pinAfterDrag)
+      layout_.SetPinned(*interaction.dragEnded, false);
+    if (boost::num_vertices(graph) == 0)
+      drawList->AddText(ImVec2(canvasMin.x + 18.0F, canvasMin.y + 18.0F),
+                        IM_COL32(190, 196, 208, 255), "No graph nodes");
+    ImGui::End();
+  }
+
+  void DrawDetails() {
+    ImGui::Begin("Details###peripheral_details");
+    if (selectedPeripheral_) {
+      const auto vertex = result_.graph.FindPeripheral(*selectedPeripheral_);
+      if (vertex && result_.graph.GetGraph()[*vertex].type ==
+                        OpenPeripherals::Graph::PeripheralNodeType::Machine) {
+        const auto &machine = result_.graph.GetGraph()[*vertex];
+        ImGui::TextUnformatted(machine.name.c_str());
+        ImGui::Separator();
+        ImGui::Text("ID: %s", machine.id.to_string().c_str());
+        ImGui::TextWrapped("Local root for peripherals discovered on this machine.");
+        ImGui::End();
+        return;
+      }
+    }
+
+    const auto selected = FindSelectedPeripheral();
+    if (!selected) {
+      ImGui::TextDisabled("Select a peripheral to see its description.");
+      ImGui::End();
+      return;
+    }
+
+    const auto &peripheral = *selected;
+    ImGui::TextWrapped("%s", peripheral.info.name.empty()
+                                 ? "Unnamed peripheral"
+                                 : peripheral.info.name.c_str());
+    ImGui::Separator();
+    ImGui::Text("ID: %s", peripheral.id.to_string().c_str());
+    ImGui::Text("Manufacturer: %s",
+                peripheral.info.manufacturer.empty()
+                    ? "Unknown"
+                    : peripheral.info.manufacturer.c_str());
+    ImGui::Text("Model: %s", peripheral.info.model.empty()
+                                 ? "Unknown"
+                                 : peripheral.info.model.c_str());
+    ImGui::TextWrapped("Description: %s",
+                       peripheral.info.description.empty()
+                           ? "No description"
+                           : peripheral.info.description.c_str());
+
+    ImGui::Separator();
+    ImGui::Text("Endpoints: %zu", peripheral.endpoints.size());
+    for (const auto &endpoint : peripheral.endpoints) {
+      ImGui::BulletText("%s: %s", endpoint.connectionType.c_str(),
+                        endpoint.address.c_str());
+    }
+    ImGui::Text("States: %zu   Events: %zu", peripheral.states.size(),
+                peripheral.events.size());
+    ImGui::Text("Streams: %zu   Operations: %zu   Resources: %zu",
+                peripheral.streams.size(), peripheral.operations.size(),
+                peripheral.resources.size());
+
+    if (!peripheral.identity.claims.empty()) {
+      ImGui::Separator();
+      ImGui::TextUnformatted("Identity claims");
+      for (const auto &claim : peripheral.identity.claims)
+        ImGui::BulletText("%u: %s", static_cast<unsigned int>(claim.type),
+                          claim.value.c_str());
+    }
+    ImGui::End();
+  }
+
+  const OpenPeripherals::PhysicalPeripheral *FindSelectedPeripheral() const {
+    if (!selectedPeripheral_)
+      return nullptr;
+    const auto found = std::find_if(
+        result_.peripherals.begin(), result_.peripherals.end(),
+        [this](const auto &peripheral) {
+          return peripheral.id == *selectedPeripheral_;
+        });
+    return found == result_.peripherals.end() ? nullptr : &*found;
+  }
+
+  void BuildDefaultDockLayout(ImGuiID dockspaceId) {
+    if (ImGui::DockBuilderGetNode(dockspaceId) != nullptr)
       return;
 
-    ImGui::DockBuilderRemoveNode(dockspace_id);
-    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(dockspace_id,
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceId,
                                   ImGui::GetMainViewport()->WorkSize);
 
-    ImGuiID details_id = dockspace_id;
-    const ImGuiID tree_id = ImGui::DockBuilderSplitNode(
-        details_id, ImGuiDir_Left, 0.28F, nullptr, &details_id);
-    ImGui::DockBuilderDockWindow("Peripheral Tree###peripheral_tree", tree_id);
-    ImGui::DockBuilderDockWindow("Details###peripheral_details", details_id);
-    ImGui::DockBuilderFinish(dockspace_id);
+    ImGuiID centerId = dockspaceId;
+    const ImGuiID listId = ImGui::DockBuilderSplitNode(
+        centerId, ImGuiDir_Left, 0.24F, nullptr, &centerId);
+    const ImGuiID detailsId = ImGui::DockBuilderSplitNode(
+        centerId, ImGuiDir_Right, 0.28F, nullptr, &centerId);
+    ImGui::DockBuilderDockWindow("Peripherals###peripheral_list", listId);
+    ImGui::DockBuilderDockWindow("Connections###peripheral_graph", centerId);
+    ImGui::DockBuilderDockWindow("Details###peripheral_details", detailsId);
+    ImGui::DockBuilderFinish(dockspaceId);
   }
 
-  void EnumerateDevices() {
-    OpenPeripherals::Instance ctx;
-    for (const auto &provider : providers_) {
-      ctx.RegisterProvider(provider);
-    }
-    devices_ = std::move(ctx.EnumerateDevices());
-    if (selected_device_ && std::find(devices_.begin(), devices_.end(),
-                                      selected_device_) == devices_.end()) {
-      selected_device_.reset();
-    }
-  }
-  void DrawEvdevDeviceDetails(
-      const OpenPeripherals::Evdev::EvdevDevice &evdevDevice) {
-    const auto &evdevInfo = evdevDevice.GetEvdevInfo();
-    const auto &capabilities = evdevDevice.GetEvdevCapabilities();
-    ImGui::Text("Evdev Bus: %s",
-                boost::describe::enum_to_string(evdevInfo.bus, "Unknown"));
-    if (ImGui::TreeNodeEx("EvDev", ImGuiTreeNodeFlags_DefaultOpen)) {
-      for (const auto &[type, components] : capabilities.components) {
-        const char *type_name =
-            boost::describe::enum_to_string(type, "Unknown");
-        ImGui::PushID(static_cast<int>(type));
-        if (ImGui::TreeNodeEx(type_name, ImGuiTreeNodeFlags_DefaultOpen)) {
-          for (const auto &component : components) {
-            const std::string code_name = std::format(
-                "type={}, code={} {}",
-                boost::describe::enum_to_string(type, "Unknown"),
-                boost::describe::enum_to_string(component.code, "Unknown"),
-              component.hasAbsoluteInfo? "has absolute info":"");
-            ImGui::TreeNodeEx(code_name.c_str(),
-                              ImGuiTreeNodeFlags_Leaf |
-                                  ImGuiTreeNodeFlags_NoTreePushOnOpen);
-          }
-          ImGui::TreePop();
-        }
-        ImGui::PopID();
-      }
-      ImGui::TreePop();
-    }
-  };
-  void DrawDeviceDetails() {
-    if (selected_device_) {
-      const auto &info = selected_device_->GetInfo();
-      ImGui::Text("Device Name: %s", info.name.c_str());
-      ImGui::Text("Manufacturer: %s", info.manufacturer.c_str());
-      ImGui::Text("Description: %s", info.description.c_str());
+  void EnumeratePeripherals() {
+    OpenPeripherals::Instance instance;
+    for (const auto &provider : providers_)
+      instance.RegisterDiscover(provider);
+    result_ = instance.EnumeratePeripherals();
+    layout_.Reset();
 
-      ImGui::Separator();
-      if (const auto evdevDevice =
-              std::dynamic_pointer_cast<OpenPeripherals::Evdev::EvdevDevice>(
-                  selected_device_)) {
-        DrawEvdevDeviceDetails(*evdevDevice);
-      }
-    }
+    if (selectedPeripheral_ &&
+        !result_.graph.FindPeripheral(*selectedPeripheral_))
+      selectedPeripheral_.reset();
   }
+
   GLFWwindow *window_{};
-  bool tree_selected_{};
-
-  std::vector<std::shared_ptr<OpenPeripherals::IProvider>> providers_;
-  std::vector<std::shared_ptr<OpenPeripherals::PhysicalPeripheral>> devices_;
-  std::shared_ptr<OpenPeripherals::PhysicalPeripheral> selected_device_;
+  std::vector<std::shared_ptr<OpenPeripherals::IDiscovery>> providers_;
+  OpenPeripherals::EnumerationResult result_;
+  std::optional<OpenPeripherals::PeripheralID> selectedPeripheral_;
+  PeripheralViewer::SpringGraphLayout layout_;
+  PeripheralViewer::PeripheralGraphRenderer renderer_;
+  PeripheralViewer::GraphPoint cameraOffset_{};
+  float cameraZoom_{1.0F};
 };
 
 int main() {
-  PeripheralViewer viewer;
+  PeripheralViewerApp viewer;
   return viewer.Run();
 }

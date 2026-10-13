@@ -1,4 +1,7 @@
-add_executable(OpenPeripheralsViewer src/Main.cpp)
+add_executable(OpenPeripheralsViewer
+    src/Main.cpp
+    src/GraphLayout.cpp
+    src/GraphRenderer.cpp)
 
 find_package(imgui REQUIRED)
 find_package(implot)

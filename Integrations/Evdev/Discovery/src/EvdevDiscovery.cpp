@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -46,6 +47,28 @@ OpenPeripherals::UUID MakeStableUUID(const std::string &value) {
   compact.insert(12, "-");
   compact.insert(8, "-");
   return OpenPeripherals::UUID::from_string(compact);
+}
+
+std::string NormalizePhysicalPath(std::string path) {
+  // EVIOCGPHYS commonly appends /inputN to a shared device path. That suffix
+  // identifies one input interface, not a separate physical device.
+  const std::size_t input = path.rfind("/input");
+  if (input != std::string::npos && input + 6 < path.size()) {
+    const bool numericSuffix = std::all_of(
+        path.begin() + static_cast<std::ptrdiff_t>(input + 6), path.end(),
+        [](unsigned char character) { return std::isdigit(character) != 0; });
+    if (numericSuffix)
+      path.erase(input);
+  }
+  return path;
+}
+
+std::string NormalizeDeviceName(std::string name) {
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char character) {
+                   return static_cast<char>(std::tolower(character));
+                 });
+  return name;
 }
 
 } // namespace
@@ -132,6 +155,8 @@ OpenPeripherals::EvdevDiscovery::Discover() {
 
     const std::string physicalPath =
         phys[0] != '\0' ? std::string(phys.data()) : std::string{};
+    const std::string normalizedPhysicalPath =
+        NormalizePhysicalPath(physicalPath);
 
     const std::string uniqueId =
         uniq[0] != '\0' ? std::string(uniq.data()) : std::string{};
@@ -141,18 +166,27 @@ OpenPeripherals::EvdevDiscovery::Discover() {
         boost::describe::enum_to_string(Evdev::EvdevBus(id.bustype), "Unknown"),
         std::to_string(id.vendor));
 
-    // Prefer the kernel's unique ID, then physical topology, and finally the
-    // event node path. The path fallback still makes endpoint IDs repeatable
-    // for devices whose drivers expose no stronger identity.
-    const std::string deviceKey =
-        !uniqueId.empty()
-            ? std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
-                          id.product, uniqueId)
-            : (!physicalPath.empty()
-                   ? std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
-                                 id.product, physicalPath)
-                   : std::format("evdev:{}:{}:{}:{}", id.bustype, id.vendor,
-                                 id.product, path.string()));
+    // Prefer an explicit unique ID. Physical topology is next, with the
+    // per-input-interface suffix removed so one USB device's event nodes
+    // share an identity. ACPI power-button aliases have distinct topology
+    // paths, so group those by their shared bus IDs and kernel device name.
+    // The event path is the final fallback when the driver exposes no better
+    // identity.
+    std::string deviceKey;
+    if (!uniqueId.empty()) {
+      deviceKey = std::format("evdev:{}:{}:{}:uniq:{}", id.bustype,
+                              id.vendor, id.product, uniqueId);
+    } else if (id.bustype == BUS_HOST && !deviceName.empty()) {
+      deviceKey = std::format("evdev:{}:{}:{}:host:{}", id.bustype,
+                              id.vendor, id.product,
+                              NormalizeDeviceName(deviceName));
+    } else if (!normalizedPhysicalPath.empty()) {
+      deviceKey = std::format("evdev:{}:{}:{}:phys:{}", id.bustype,
+                              id.vendor, id.product, normalizedPhysicalPath);
+    } else {
+      deviceKey = std::format("evdev:{}:{}:{}:node:{}", id.bustype,
+                              id.vendor, id.product, path.string());
+    }
     const PeripheralID peripheralId = MakeStableUUID(deviceKey);
     const EndpointID endpointId = MakeStableUUID("endpoint:" + path.string());
 

@@ -7,14 +7,19 @@
 #include <boost/graph/adjacency_list.hpp>
 
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace OpenPeripherals {
 namespace Graph {
 
+enum class PeripheralNodeType { Machine, Peripheral };
+
 struct PeripheralVertex {
   PeripheralID id;
+  PeripheralNodeType type{PeripheralNodeType::Peripheral};
+  std::string name;
 };
 using EdgeID = std::uint32_t;
 struct PeripheralEdge {
@@ -38,12 +43,32 @@ public:
 
   PeripheralGraph() = default;
 
-  Vertex AddPeripheral(PeripheralID id) {
+  Vertex AddPeripheral(PeripheralID id, std::string name = {}) {
     if (auto it = vertices_.find(id); it != vertices_.end())
       return it->second;
 
-    auto vertex = boost::add_vertex(PeripheralVertex{id}, graph_);
+    auto vertex = boost::add_vertex(
+        PeripheralVertex{.id = id,
+                         .type = PeripheralNodeType::Peripheral,
+                         .name = std::move(name)},
+        graph_);
 
+    vertices_.emplace(id, vertex);
+    return vertex;
+  }
+
+  Vertex AddMachine(PeripheralID id, std::string name) {
+    if (auto it = vertices_.find(id); it != vertices_.end()) {
+      graph_[it->second].type = PeripheralNodeType::Machine;
+      graph_[it->second].name = std::move(name);
+      return it->second;
+    }
+
+    auto vertex = boost::add_vertex(
+        PeripheralVertex{.id = id,
+                         .type = PeripheralNodeType::Machine,
+                         .name = std::move(name)},
+        graph_);
     vertices_.emplace(id, vertex);
     return vertex;
   }

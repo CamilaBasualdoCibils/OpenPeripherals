@@ -2,7 +2,7 @@
 
 #include "OpenPeripherals/Core/PeripheralGraph.hpp"
 #include "OpenPeripherals/Core/PhysicalPeripheral.hpp"
-#include <memory>
+#include <vector>
 namespace OpenPeripherals {
 
 struct EnumerationResult {

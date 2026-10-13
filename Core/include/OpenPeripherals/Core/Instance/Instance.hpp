@@ -16,7 +16,8 @@ public:
 
   void RegisterDiscover(std::shared_ptr<IDiscovery> discovery);
 
-  [[nodiscard]] EnumerationResult EnumerateDevices() const;
+  [[nodiscard]] EnumerationResult EnumeratePeripherals() const;
+
 
   std::shared_ptr<ILogicalPeripheral>
   CreateDevice(const LogicalPeripheralCreateInfo &) {
